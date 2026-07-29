@@ -1,0 +1,72 @@
+[project]
+name = "texttosql"
+version = "0.1.0"
+description = "Natural-language-to-SQL agent (LangGraph + Gemini + PostgreSQL) for a professional-services firm."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    # Agent framework
+    "langgraph>=0.2.55",
+    "langchain>=0.3.7",
+    "langchain-core>=0.3.15",
+    "langchain-community>=0.3.5",
+    # LLM: Google Gemini
+    "langchain-google-genai>=2.0.4",
+    "google-generativeai>=0.8.3",
+    # Database
+    "sqlalchemy>=2.0.30",
+    "psycopg[binary]>=3.2.0",
+    # SQL safety / parsing
+    "sqlglot>=25.0.0",
+    # API
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    # Config / data
+    "pydantic>=2.9.0",
+    "pydantic-settings>=2.6.0",
+    "pyyaml>=6.0.2",
+    "python-dotenv>=1.0.1",
+    "faker>=30.0.0",
+]
+
+[project.optional-dependencies]
+# Optional: pgvector retrieval mode + durable checkpointer + tracing
+retrieval = [
+    "pgvector>=0.3.6",
+    "langchain-postgres>=0.0.12",
+]
+# Docker-free local Postgres (embedded, ships pgvector)
+embedded = [
+    "pgserver>=0.1.4",
+]
+memory = [
+    "langgraph-checkpoint-postgres>=2.0.1",
+]
+tracing = [
+    "langsmith>=0.1.140",
+]
+dev = [
+    "pytest>=8.3.0",
+    "ruff>=0.7.0",
+]
+
+[project.scripts]
+texttosql = "texttosql.agent.graph:_cli"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+texttosql = ["db/*.sql", "knowledge/*.yaml"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

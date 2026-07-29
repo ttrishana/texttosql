@@ -1,0 +1,45 @@
+# Data-source registry: one entry per domain database. The router picks exactly
+# one source per question (single-domain routing). `tables` are listed in
+# dependency order (FK parents first) and drive both the per-domain schema split
+# and which few-shots apply to the source.
+#
+# Embedded mode  -> `database:` names a database on the embedded Postgres server.
+# External mode  -> replace `database:` with `url:` (a read-only postgresql+psycopg
+#                   URL) or `url_env:` (name of an env var holding that URL).
+
+sources:
+  hr:
+    description: >
+      People & HR analytics: employees (current and former), compensation and
+      salaries, performance reviews/ratings, professional certifications, leave,
+      and org structure (offices, departments, grades/levels). Use for headcount,
+      attrition, pay, tenure, seniority, and certification questions.
+    database: hrdb
+    tables: [offices, grades, departments, employees, compensation,
+             performance_reviews, certifications, leave]
+
+  audit:
+    description: >
+      Audit & client-delivery operations: clients, engagements (all service
+      lines), engagement staffing, timesheets/billable hours, and audit findings.
+      Use for utilization, billable hours, engagement budgets/status, staffing,
+      and audit finding questions.
+    database: auditdb
+    tables: [offices, grades, service_lines, clients, employees, engagements,
+             engagement_staffing, time_entries, audit_findings]
+
+  tax:
+    description: >
+      Tax practice: clients, tax engagements, and tax returns/filings across
+      jurisdictions (filing status, due dates, refunds/balances). Use for tax
+      return, filing deadline, and jurisdiction questions.
+    database: taxdb
+    tables: [clients, service_lines, engagements, tax_returns]
+
+  billing:
+    description: >
+      Billing & finance: invoices, invoice line items, payments, and expenses.
+      Use for revenue, receivables, overdue invoices, days-to-payment, and
+      expense questions.
+    database: billingdb
+    tables: [clients, invoices, invoice_line_items, payments, expenses]

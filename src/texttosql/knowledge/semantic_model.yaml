@@ -1,0 +1,190 @@
+# Curated business overlay on top of the live PostgreSQL schema.
+# The SemanticCatalog merges this with introspected columns/types/keys and
+# renders it into the SQL-generation prompt.
+
+database:
+  dialect: PostgreSQL
+  description: >
+    Operational database for a global professional-services firm delivering
+    Audit, Tax, Accounting (bookkeeping) and Advisory services, plus internal
+    HR / people analytics. Fiscal year runs Jul 1 - Jun 30; a label like
+    'FY2025' means the fiscal year ending 30 Jun 2025.
+
+tables:
+  offices:
+    description: "Physical offices of the firm."
+    synonyms: [office, location, branch]
+    columns:
+      region: {description: "Geographic region.", enum: [Americas, EMEA, APAC]}
+
+  service_lines:
+    description: "The firm's four practice areas."
+    synonyms: [practice, service line, department (business)]
+    columns:
+      name: {enum: [Audit, Tax, Accounting, Advisory]}
+
+  departments:
+    description: "HR departments, one per office x service line (e.g. 'Audit - London')."
+    synonyms: [team, org unit]
+
+  grades:
+    description: "Career grades / job levels. rank_order 1=Analyst (junior) .. 6=Partner (senior)."
+    synonyms: [level, seniority, title, job level]
+    columns:
+      name: {enum: [Analyst, "Senior Associate", Manager, "Senior Manager", Director, Partner]}
+      rank_order: {description: "1=most junior, 6=Partner."}
+
+  employees:
+    description: "One row per employee, current and former staff of the firm."
+    synonyms: [staff, people, headcount, workers, employee, consultant]
+    columns:
+      employment_status: {description: "Current status.", enum: [active, terminated, on_leave]}
+      termination_date: {description: "NULL while still employed; set when the person left."}
+      manager_id: {description: "Self-reference to the employee's line manager."}
+      hire_date: {description: "Date the employee joined the firm."}
+    joins:
+      - "employees.office_id = offices.office_id"
+      - "employees.grade_id = grades.grade_id"
+      - "employees.service_line_id = service_lines.service_line_id"
+      - "employees.department_id = departments.department_id"
+      - "employees.manager_id = employees.employee_id  -- self join for manager"
+
+  compensation:
+    description: >
+      Salary history. Each employee has one or more rows; the CURRENT salary is
+      the row with the greatest effective_date for that employee.
+    synonyms: [salary, pay, comp, remuneration, wage]
+    columns:
+      base_salary: {description: "Annual base salary in `currency`."}
+      bonus_target_pct: {description: "Target bonus as a percent of base."}
+    notes: "For current salary use DISTINCT ON (employee_id) ... ORDER BY employee_id, effective_date DESC."
+
+  performance_reviews:
+    description: "Annual performance ratings per employee per fiscal year."
+    synonyms: [review, rating, appraisal, performance]
+    columns:
+      rating: {description: "1.0 (low) to 5.0 (high)."}
+      review_period: {description: "Fiscal-year label, e.g. 'FY2025'."}
+
+  certifications:
+    description: "Professional certifications held by employees."
+    synonyms: [certification, qualification, credential, license]
+    columns:
+      name: {enum: [CPA, ACCA, CA, CFA, EA]}
+
+  leave:
+    description: "Leave / time-off records per employee."
+    synonyms: [time off, absence, holiday, PTO, vacation]
+    columns:
+      leave_type: {enum: [annual, sick, parental, unpaid]}
+
+  clients:
+    description: "Firm clients."
+    synonyms: [customer, account, company]
+    columns:
+      size_segment: {enum: [SMB, Mid-Market, Enterprise]}
+      status: {enum: [active, churned, prospect]}
+
+  engagements:
+    description: >
+      A unit of client work (audit, tax filing, bookkeeping or advisory project)
+      for a fiscal year. Has a partner and manager, a budget and budgeted hours.
+    synonyms: [project, job, case, assignment, matter]
+    columns:
+      engagement_type: {enum: [Audit, Tax, Bookkeeping, Advisory]}
+      status: {enum: [planned, in_progress, completed, on_hold]}
+      fiscal_year: {description: "Label like 'FY2025'."}
+      budget_amount: {description: "Budgeted fee revenue for the engagement."}
+      budgeted_hours: {description: "Budgeted labor hours."}
+      partner_id: {description: "Lead partner (employees.employee_id)."}
+    joins:
+      - "engagements.client_id = clients.client_id"
+      - "engagements.service_line_id = service_lines.service_line_id"
+      - "engagements.partner_id = employees.employee_id"
+
+  engagement_staffing:
+    description: "Which employees are assigned to which engagements, and at what allocation."
+    synonyms: [staffing, assignment, allocation, team]
+
+  time_entries:
+    description: >
+      Timesheet lines: hours an employee logged against an engagement on a date.
+      billable=true means the time can be billed to the client.
+    synonyms: [timesheet, hours, time log, time]
+    columns:
+      billable: {description: "TRUE if the hours are billable to the client."}
+      billing_rate: {description: "Hourly rate applied when billable (NULL otherwise)."}
+    joins:
+      - "time_entries.engagement_id = engagements.engagement_id"
+      - "time_entries.employee_id = employees.employee_id"
+
+  invoices:
+    description: "Client invoices. `amount` is net of tax; `tax_amount` is tax."
+    synonyms: [invoice, bill, receivable]
+    columns:
+      status: {description: "Lifecycle.", enum: [draft, sent, paid, overdue]}
+      due_date: {description: "Payment due date."}
+    joins:
+      - "invoices.client_id = clients.client_id"
+      - "invoices.engagement_id = engagements.engagement_id"
+
+  invoice_line_items:
+    description: "Line items that sum to an invoice's amount."
+    synonyms: [line item, invoice detail]
+
+  payments:
+    description: "Payments received against invoices."
+    synonyms: [payment, receipt, remittance]
+
+  expenses:
+    description: "Employee expenses charged to engagements."
+    synonyms: [expense, cost, disbursement]
+    columns:
+      category: {enum: [travel, meals, software, training, other]}
+
+  tax_returns:
+    description: "Tax returns prepared/filed for clients (Tax engagements)."
+    synonyms: [tax return, filing, return]
+    columns:
+      filing_status: {enum: [not_started, in_prep, filed, amended]}
+      balance_amount: {description: "Positive = owed to authority; negative = refund."}
+      due_date: {description: "Statutory filing deadline."}
+
+  audit_findings:
+    description: "Findings raised during Audit engagements."
+    synonyms: [finding, issue, exception, deficiency]
+    columns:
+      severity: {enum: [low, medium, high]}
+      status: {enum: [open, resolved]}
+
+# Reusable metric definitions the model should prefer for common business terms.
+metrics:
+  headcount:
+    description: "Number of currently active employees."
+    sql: "COUNT(*) FILTER (WHERE employees.employment_status = 'active')"
+  current_salary:
+    description: "Each employee's latest base_salary (max effective_date in compensation)."
+    sql: "SELECT DISTINCT ON (employee_id) employee_id, base_salary FROM compensation ORDER BY employee_id, effective_date DESC"
+  attrition_rate:
+    description: "Terminations within a period divided by average headcount in that period."
+  utilization_rate:
+    description: "Billable hours divided by total logged hours."
+    sql: "SUM(hours) FILTER (WHERE billable) / NULLIF(SUM(hours), 0)"
+  billable_hours:
+    description: "Sum of hours where time_entries.billable = TRUE."
+    sql: "SUM(time_entries.hours) FILTER (WHERE time_entries.billable)"
+  revenue:
+    description: "Recognized fee revenue = net invoice amount (exclude tax). Use invoices.amount."
+  realization_rate:
+    description: "Billed fees divided by standard value of time (billable hours x billing_rate)."
+  engagement_margin:
+    description: "(budget_amount - labor cost) / budget_amount; labor cost approximated by billable time value."
+
+glossary:
+  FY: "Fiscal year, Jul 1 - Jun 30. 'FY2025' ends 30 Jun 2025."
+  this_fiscal_year: "The fiscal year containing CURRENT_DATE."
+  overdue_invoice: "invoices.status = 'overdue'."
+  active_employee: "employees.employment_status = 'active'."
+  billable: "time_entries.billable = TRUE."
+  partner: "An employee whose grade is 'Partner' (grades.rank_order = 6)."
+  days_to_payment: "payments.payment_date - invoices.invoice_date."

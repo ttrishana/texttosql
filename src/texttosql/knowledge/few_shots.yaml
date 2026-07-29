@@ -1,0 +1,228 @@
+# Curated natural-language -> SQL examples. They teach firm-specific patterns
+# (current salary via latest compensation row, fiscal-year filters, utilization)
+# and double as the golden eval set in tests/test_eval.py.
+# All SQL is PostgreSQL and read-only (SELECT).
+
+- question: "What is the average base salary by grade in the London office?"
+  tags: [hr, salary]
+  sql: |
+    SELECT g.name AS grade, AVG(c.base_salary) AS avg_base_salary
+    FROM employees e
+    JOIN grades g  ON g.grade_id = e.grade_id
+    JOIN offices o ON o.office_id = e.office_id
+    JOIN LATERAL (
+      SELECT base_salary FROM compensation
+      WHERE employee_id = e.employee_id
+      ORDER BY effective_date DESC LIMIT 1
+    ) c ON TRUE
+    WHERE o.city = 'London' AND e.employment_status = 'active'
+    GROUP BY g.name, g.rank_order
+    ORDER BY g.rank_order;
+
+- question: "How many active employees are in each service line?"
+  tags: [hr, headcount]
+  sql: |
+    SELECT sl.name AS service_line, COUNT(*) AS headcount
+    FROM employees e
+    JOIN service_lines sl ON sl.service_line_id = e.service_line_id
+    WHERE e.employment_status = 'active'
+    GROUP BY sl.name
+    ORDER BY headcount DESC;
+
+- question: "Who are the top 5 highest-paid active employees without a CPA?"
+  tags: [hr, salary, certifications]
+  sql: |
+    SELECT e.first_name, e.last_name, c.base_salary
+    FROM employees e
+    JOIN LATERAL (
+      SELECT base_salary FROM compensation
+      WHERE employee_id = e.employee_id
+      ORDER BY effective_date DESC LIMIT 1
+    ) c ON TRUE
+    WHERE e.employment_status = 'active'
+      AND NOT EXISTS (
+        SELECT 1 FROM certifications ct
+        WHERE ct.employee_id = e.employee_id AND ct.name = 'CPA'
+      )
+    ORDER BY c.base_salary DESC
+    LIMIT 5;
+
+- question: "How many managers left the firm in FY2025?"
+  tags: [hr, attrition]
+  sql: |
+    SELECT COUNT(*) AS managers_left
+    FROM employees e
+    JOIN grades g ON g.grade_id = e.grade_id
+    WHERE g.name = 'Manager'
+      AND e.termination_date >= DATE '2024-07-01'
+      AND e.termination_date <= DATE '2025-06-30';
+
+- question: "What is the utilization rate of Audit staff over the last 90 days?"
+  tags: [utilization]
+  sql: |
+    SELECT SUM(t.hours) FILTER (WHERE t.billable) / NULLIF(SUM(t.hours), 0) AS utilization_rate
+    FROM time_entries t
+    JOIN employees e      ON e.employee_id = t.employee_id
+    JOIN service_lines sl ON sl.service_line_id = e.service_line_id
+    WHERE sl.name = 'Audit'
+      AND t.entry_date >= CURRENT_DATE - INTERVAL '90 days';
+
+- question: "Which 10 employees logged the most billable hours in the last quarter?"
+  tags: [utilization, hours]
+  sql: |
+    SELECT e.first_name, e.last_name, SUM(t.hours) AS billable_hours
+    FROM time_entries t
+    JOIN employees e ON e.employee_id = t.employee_id
+    WHERE t.billable
+      AND t.entry_date >= CURRENT_DATE - INTERVAL '3 months'
+    GROUP BY e.employee_id, e.first_name, e.last_name
+    ORDER BY billable_hours DESC
+    LIMIT 10;
+
+- question: "Total revenue by service line for FY2025."
+  tags: [revenue, billing]
+  sql: |
+    SELECT sl.name AS service_line, SUM(i.amount) AS revenue
+    FROM invoices i
+    JOIN engagements en    ON en.engagement_id = i.engagement_id
+    JOIN service_lines sl  ON sl.service_line_id = en.service_line_id
+    WHERE en.fiscal_year = 'FY2025'
+    GROUP BY sl.name
+    ORDER BY revenue DESC;
+
+- question: "Which clients have overdue invoices, and what is the total overdue amount?"
+  tags: [billing, receivables]
+  sql: |
+    SELECT cl.name AS client, SUM(i.amount + i.tax_amount) AS overdue_amount
+    FROM invoices i
+    JOIN clients cl ON cl.client_id = i.client_id
+    WHERE i.status = 'overdue'
+    GROUP BY cl.name
+    ORDER BY overdue_amount DESC;
+
+- question: "What is the average number of days to payment by client size segment?"
+  tags: [billing, payments]
+  sql: |
+    SELECT cl.size_segment, AVG(p.payment_date - i.invoice_date) AS avg_days_to_payment
+    FROM payments p
+    JOIN invoices i ON i.invoice_id = p.invoice_id
+    JOIN clients cl ON cl.client_id = i.client_id
+    GROUP BY cl.size_segment
+    ORDER BY avg_days_to_payment;
+
+- question: "Which audit engagements are over budget by billed value?"
+  tags: [engagements, audit, budget]
+  sql: |
+    SELECT en.engagement_id, en.name, en.budget_amount,
+           SUM(t.hours * t.billing_rate) FILTER (WHERE t.billable) AS billed_value
+    FROM engagements en
+    JOIN time_entries t ON t.engagement_id = en.engagement_id
+    WHERE en.engagement_type = 'Audit'
+    GROUP BY en.engagement_id, en.name, en.budget_amount
+    HAVING SUM(t.hours * t.billing_rate) FILTER (WHERE t.billable) > en.budget_amount
+    ORDER BY billed_value DESC;
+
+- question: "List in-progress engagements ending this month with their client."
+  tags: [engagements]
+  sql: |
+    SELECT en.engagement_id, en.name, en.end_date, cl.name AS client
+    FROM engagements en
+    JOIN clients cl ON cl.client_id = en.client_id
+    WHERE en.status = 'in_progress'
+      AND en.end_date >= date_trunc('month', CURRENT_DATE)
+      AND en.end_date <  date_trunc('month', CURRENT_DATE) + INTERVAL '1 month'
+    ORDER BY en.end_date;
+
+- question: "What is the average engagement margin by partner?"
+  tags: [engagements, margin]
+  sql: |
+    SELECT e.first_name, e.last_name,
+           AVG((en.budget_amount - v.billed_value) / NULLIF(en.budget_amount, 0)) AS avg_margin
+    FROM engagements en
+    JOIN employees e ON e.employee_id = en.partner_id
+    JOIN LATERAL (
+      SELECT COALESCE(SUM(t.hours * t.billing_rate) FILTER (WHERE t.billable), 0) AS billed_value
+      FROM time_entries t WHERE t.engagement_id = en.engagement_id
+    ) v ON TRUE
+    GROUP BY e.employee_id, e.first_name, e.last_name
+    ORDER BY avg_margin DESC;
+
+- question: "Which tax returns are unfiled and due within the next 30 days?"
+  tags: [tax]
+  sql: |
+    SELECT tr.return_id, cl.name AS client, tr.jurisdiction, tr.return_type, tr.due_date
+    FROM tax_returns tr
+    JOIN clients cl ON cl.client_id = tr.client_id
+    WHERE tr.filing_status IN ('not_started', 'in_prep')
+      AND tr.due_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '30 days'
+    ORDER BY tr.due_date;
+
+- question: "How many unresolved high-severity audit findings are there per engagement?"
+  tags: [audit, findings]
+  sql: |
+    SELECT en.name AS engagement, COUNT(*) AS open_high_findings
+    FROM audit_findings af
+    JOIN engagements en ON en.engagement_id = af.engagement_id
+    WHERE af.severity = 'high' AND af.status = 'open'
+    GROUP BY en.name
+    ORDER BY open_high_findings DESC;
+
+- question: "Total tax refunds by jurisdiction for tax year 2024."
+  tags: [tax]
+  sql: |
+    SELECT jurisdiction, SUM(-balance_amount) AS total_refund
+    FROM tax_returns
+    WHERE tax_year = 2024 AND balance_amount < 0
+    GROUP BY jurisdiction
+    ORDER BY total_refund DESC;
+
+- question: "Show active headcount by office and grade."
+  tags: [hr, headcount]
+  sql: |
+    SELECT o.city, g.name AS grade, COUNT(*) AS headcount
+    FROM employees e
+    JOIN offices o ON o.office_id = e.office_id
+    JOIN grades g  ON g.grade_id = e.grade_id
+    WHERE e.employment_status = 'active'
+    GROUP BY o.city, g.name, g.rank_order
+    ORDER BY o.city, g.rank_order;
+
+- question: "What is the average performance rating by service line for FY2025?"
+  tags: [hr, performance]
+  sql: |
+    SELECT sl.name AS service_line, AVG(pr.rating) AS avg_rating
+    FROM performance_reviews pr
+    JOIN employees e      ON e.employee_id = pr.employee_id
+    JOIN service_lines sl ON sl.service_line_id = e.service_line_id
+    WHERE pr.review_period = 'FY2025'
+    GROUP BY sl.name
+    ORDER BY avg_rating DESC;
+
+- question: "Which 10 clients generated the most revenue in the last 12 months?"
+  tags: [revenue, clients]
+  sql: |
+    SELECT cl.name AS client, SUM(i.amount) AS revenue
+    FROM invoices i
+    JOIN clients cl ON cl.client_id = i.client_id
+    WHERE i.invoice_date >= CURRENT_DATE - INTERVAL '12 months'
+    GROUP BY cl.name
+    ORDER BY revenue DESC
+    LIMIT 10;
+
+- question: "What is the total outstanding (unpaid) receivables amount?"
+  tags: [billing, receivables]
+  sql: |
+    SELECT SUM(i.amount + i.tax_amount) AS outstanding_receivables
+    FROM invoices i
+    WHERE i.status IN ('sent', 'overdue');
+
+- question: "Who are the top 10 managers by number of active direct reports?"
+  tags: [hr, org]
+  sql: |
+    SELECT m.first_name, m.last_name, COUNT(*) AS direct_reports
+    FROM employees e
+    JOIN employees m ON m.employee_id = e.manager_id
+    WHERE e.employment_status = 'active'
+    GROUP BY m.employee_id, m.first_name, m.last_name
+    ORDER BY direct_reports DESC
+    LIMIT 10;
