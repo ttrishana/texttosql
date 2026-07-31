@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-fira-sans);
+  --font-mono: var(--font-roboto-mono);
+
+  /* Baker Tilly brand */
+  --color-sidebar:       #2b303a;
+  --color-sidebar-hover: #353b47;
+  --color-accent:        #d1eb57;
+  --color-accent-hover:  #b8d44d;
+  --color-accent-dim:    rgba(209, 235, 87, 0.15);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-fira-sans), Arial, Helvetica, sans-serif;
+}
+
+/* Thin, unobtrusive scrollbars inside panels */
+.panel-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
